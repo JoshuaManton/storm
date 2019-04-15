@@ -24,21 +24,22 @@ Label_Reference :: struct {
 DEBUG_MODE :: true;
 
 STACK_SIZE :: 50000; // number of u64's
-NUM_REGISTERS :: max(u16);
+NUM_REGISTERS :: max(u16); // yeah this is pretty cheese but once crest has proper register allocation then I'll worry about making the VM actually be hardware-implementable
 MEMORY_SIZE :: 64;
 VM :: struct {
-	do_print_registers: bool,
-	instructions_human: [dynamic]Instruction,
+	encoded_instructions: [dynamic]u64,
+	stack_memory:         [STACK_SIZE]u64,
+	register_memory:      [NUM_REGISTERS]u64,
+	main_memory:          [MEMORY_SIZE]u64,
 
+
+
+	do_print_registers: bool,
+	instructions_readable: [dynamic]Instruction,
 	instruction_hit_counts: [dynamic]int,
 
 	label_references: [dynamic]Label_Reference,
 	label_to_ip: map[string]u64,
-
-	instructions_memory: [64]u64,
-	stack_memory:    [STACK_SIZE]u64,
-	register_memory: [NUM_REGISTERS]u64,
-	main_memory:     [MEMORY_SIZE]u64,
 }
 
 patch_labels :: proc(vm: ^VM) {
@@ -46,23 +47,24 @@ patch_labels :: proc(vm: ^VM) {
 		ip, ok := vm.label_to_ip[ref.str];
 		assert(ok, ref.str);
 
-		hi := decode(vm.instructions_memory[ref.ip]);
-		lo := decode(vm.instructions_memory[ref.ip+1]);
+		hi := decode(vm.encoded_instructions[ref.ip]);
+		lo := decode(vm.encoded_instructions[ref.ip+1]);
 
 		hi.p2 = cast(u16)((ip & HIHI_BITS_64) >> 48);
 		hi.p3 = cast(u16)((ip & HILO_BITS_64) >> 32);
 		lo.p2 = cast(u16)((ip & LOHI_BITS_64) >> 16);
 		lo.p3 = cast(u16)((ip & LOLO_BITS_64) >>  0);
 
-		vm.instructions_memory[ref.ip]   = encode(hi);
-		vm.instructions_memory[ref.ip+1] = encode(lo);
+		vm.encoded_instructions[ref.ip]   = encode(hi);
+		vm.encoded_instructions[ref.ip+1] = encode(lo);
 	}
 }
 
 encode_instructions :: proc(vm: ^VM) {
-	for inst, i in vm.instructions_human {
+	clear(&vm.encoded_instructions);
+	for inst, i in vm.instructions_readable {
 		encoded := encode(inst);
-		vm.instructions_memory[i] = encoded;
+		append(&vm.encoded_instructions, encoded);
 	}
 }
 
@@ -71,7 +73,7 @@ execute :: proc(vm: ^VM) {
 	patch_labels(vm);
 
 	when DEBUG_MODE {
-		vm.instruction_hit_counts = make([dynamic]int, len(vm.instructions_human));
+		vm.instruction_hit_counts = make([dynamic]int, len(vm.instructions_readable));
 	}
 
 	for step(vm) {
@@ -79,27 +81,25 @@ execute :: proc(vm: ^VM) {
 }
 
 destroy_vm :: proc(using vm: ^VM) {
-	delete(instructions_human);
+	delete(instructions_readable);
+	delete(encoded_instructions);
 	delete(label_to_ip);
 	delete(label_references);
-
-	when DEBUG_MODE {
-		delete(instruction_hit_counts);
-	}
+	delete(instruction_hit_counts);
 }
 
 step :: proc(using vm: ^VM) -> bool {
-	if register_memory[rip] >= cast(u64)len(instructions_human) do return false;
+	if register_memory[rip] >= cast(u64)len(instructions_readable) do return false;
 
 	when DEBUG_MODE {
 		this_instruction_idx := register_memory[rip];
-		instruction_raw := instructions_memory[this_instruction_idx];
+		instruction_raw := encoded_instructions[this_instruction_idx];
 
 		instruction_hit_counts[this_instruction_idx] += 1;
 		instruction := decode(instruction_raw);
 	}
 	else {
-		instruction := transmute(Instruction)instructions_memory[register_memory[rip]];
+		instruction := transmute(Instruction)encoded_instructions[register_memory[rip]];
 	}
 
 	register_memory[rip] += 1;
@@ -217,7 +217,7 @@ print_registers :: proc(vm: ^VM) {
 when DEBUG_MODE {
 	print_instruction_counts :: proc(vm: ^VM) {
 		for val, idx in vm.instruction_hit_counts {
-			println(vm.instructions_human[idx].kind, val);
+			println(vm.instructions_readable[idx].kind, val);
 		}
 	}
 }
@@ -276,192 +276,192 @@ decode :: inline proc(raw: u64) -> Instruction {
 
 quit :: inline proc(using vm: ^VM) {
 	inst := Instruction{QUIT, 0, 0, 0};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 brk :: inline proc(using vm: ^VM) {
 	inst := Instruction{BREAK, 0, 0, 0};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 goto :: inline proc(using vm: ^VM, str: string) {
-	ref := Label_Reference{cast(u64)len(instructions_human), str};
+	ref := Label_Reference{cast(u64)len(instructions_readable), str};
 	append(&label_references, ref);
 	moviu(vm, rj, 0); // will be backpatched
 	inst := Instruction{GOTO, 0, 0, 0};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 
 mov :: inline proc(using vm: ^VM, rd, p1: Register) {
 	inst := Instruction{MOV, cast(u16)rd, cast(u16)p1, 0};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 
 jeq :: inline proc(using vm: ^VM, str: string, r1, r2: Register) {
-	ref := Label_Reference{cast(u64)len(instructions_human), str};
+	ref := Label_Reference{cast(u64)len(instructions_readable), str};
 	append(&label_references, ref);
 	moviu(vm, rj, 0); // will be backpatched
 	inst := Instruction{JEQ, 0, cast(u16)r1, cast(u16)r2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 jne :: inline proc(using vm: ^VM, str: string, r1, r2: Register) {
-	ref := Label_Reference{cast(u64)len(instructions_human), str};
+	ref := Label_Reference{cast(u64)len(instructions_readable), str};
 	append(&label_references, ref);
 	moviu(vm, rj, 0); // will be backpatched
 	inst := Instruction{JNE, 0, cast(u16)r1, cast(u16)r2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 jlt :: inline proc(using vm: ^VM, str: string, r1, r2: Register) {
-	ref := Label_Reference{cast(u64)len(instructions_human), str};
+	ref := Label_Reference{cast(u64)len(instructions_readable), str};
 	append(&label_references, ref);
 	moviu(vm, rj, 0); // will be backpatched
 	inst := Instruction{JLT, 0, cast(u16)r1, cast(u16)r2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 jge :: inline proc(using vm: ^VM, str: string, r1, r2: Register) {
-	ref := Label_Reference{cast(u64)len(instructions_human), str};
+	ref := Label_Reference{cast(u64)len(instructions_readable), str};
 	append(&label_references, ref);
 	moviu(vm, rj, 0); // will be backpatched
 	inst := Instruction{JGE, 0, cast(u16)r1, cast(u16)r2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 jltu :: inline proc(using vm: ^VM, str: string, r1, r2: Register) {
-	ref := Label_Reference{cast(u64)len(instructions_human), str};
+	ref := Label_Reference{cast(u64)len(instructions_readable), str};
 	append(&label_references, ref);
 	moviu(vm, rj, 0); // will be backpatched
 	inst := Instruction{JLTU, 0, cast(u16)r1, cast(u16)r2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 jgeu :: inline proc(using vm: ^VM, str: string, r1, r2: Register) {
-	ref := Label_Reference{cast(u64)len(instructions_human), str};
+	ref := Label_Reference{cast(u64)len(instructions_readable), str};
 	append(&label_references, ref);
 	moviu(vm, rj, 0); // will be backpatched
 	inst := Instruction{JGEU, 0, cast(u16)r1, cast(u16)r2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 sv8 :: inline proc(using vm: ^VM, p1, p2: Register) {
 	inst := Instruction{SV8, cast(u16)p1, cast(u16)p2, 0};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 sv16 :: inline proc(using vm: ^VM, p1, p2: Register) {
 	inst := Instruction{SV16, cast(u16)p1, cast(u16)p2, 0};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 sv32 :: inline proc(using vm: ^VM, p1, p2: Register) {
 	inst := Instruction{SV32, cast(u16)p1, cast(u16)p2, 0};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 sv64 :: inline proc(using vm: ^VM, p1, p2: Register) {
 	inst := Instruction{SV64, cast(u16)p1, cast(u16)p2, 0};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 ld8 :: inline proc(using vm: ^VM, p1, p2: Register) {
 	inst := Instruction{LD8, cast(u16)p1, cast(u16)p2, 0};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 ld16 :: inline proc(using vm: ^VM, p1, p2: Register) {
 	inst := Instruction{LD16, cast(u16)p1, cast(u16)p2, 0};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 ld32 :: inline proc(using vm: ^VM, p1, p2: Register) {
 	inst := Instruction{LD32, cast(u16)p1, cast(u16)p2, 0};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 ld64 :: inline proc(using vm: ^VM, p1, p2: Register) {
 	inst := Instruction{LD64, cast(u16)p1, cast(u16)p2, 0};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 add :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 	inst := Instruction{ADD, cast(u16)rd, cast(u16)p1, cast(u16)p2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 addi :: inline proc(using vm: ^VM, rd, p1: Register, p2: i16) {
 	inst := Instruction{ADDI, cast(u16)rd, cast(u16)p1, transmute(u16)p2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 sub :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 	inst := Instruction{SUB, cast(u16)rd, cast(u16)p1, cast(u16)p2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 mul :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 	inst := Instruction{MUL, cast(u16)rd, cast(u16)p1, cast(u16)p2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 div :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 	inst := Instruction{DIV, cast(u16)rd, cast(u16)p1, cast(u16)p2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 mod :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 	inst := Instruction{MOD, cast(u16)rd, cast(u16)p1, cast(u16)p2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 addu :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 	inst := Instruction{ADDU, cast(u16)rd, cast(u16)p1, cast(u16)p2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 subu :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 	inst := Instruction{SUBU, cast(u16)rd, cast(u16)p1, cast(u16)p2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 mulu :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 	inst := Instruction{MULU, cast(u16)rd, cast(u16)p1, cast(u16)p2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 divu :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 	inst := Instruction{DIVU, cast(u16)rd, cast(u16)p1, cast(u16)p2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 modu :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 	inst := Instruction{MODU, cast(u16)rd, cast(u16)p1, cast(u16)p2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 addf :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 	inst := Instruction{ADDF, cast(u16)rd, cast(u16)p1, cast(u16)p2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 subf :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 	inst := Instruction{SUBF, cast(u16)rd, cast(u16)p1, cast(u16)p2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 mulf :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 	inst := Instruction{MULF, cast(u16)rd, cast(u16)p1, cast(u16)p2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 divf :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 	inst := Instruction{DIVF, cast(u16)rd, cast(u16)p1, cast(u16)p2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 shl :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 	inst := Instruction{SHL, cast(u16)rd, cast(u16)p1, cast(u16)p2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 shr :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 	inst := Instruction{SHR, cast(u16)rd, cast(u16)p1, cast(u16)p2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 and :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 	inst := Instruction{AND, cast(u16)rd, cast(u16)p1, cast(u16)p2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 or :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 	inst := Instruction{OR, cast(u16)rd, cast(u16)p1, cast(u16)p2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 xor :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 	inst := Instruction{XOR, cast(u16)rd, cast(u16)p1, cast(u16)p2};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 stack_push :: inline proc(using vm: ^VM, r1: Register) {
 	inst := Instruction{PUSH, cast(u16)r1, 0, 0};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 stack_pop :: inline proc(using vm: ^VM, r1: Register) {
 	inst := Instruction{POP, cast(u16)r1, 0, 0};
-	append(&instructions_human, inst);
+	append(&instructions_readable, inst);
 }
 
 // PSEUDOINSTRUCTIONS
 
 call :: inline proc(using vm: ^VM, str: string) {
-	ref := Label_Reference{cast(u64)len(instructions_human), str};
+	ref := Label_Reference{cast(u64)len(instructions_readable), str};
 	append(&label_references, ref);
 	moviu(vm, rj, 0); // will be backpatched
 	stack_push(vm, rip);
@@ -477,14 +477,14 @@ movi :: inline proc(using vm: ^VM, rd: Register, _p1: i64) {
 	p1 := transmute(u64)_p1;
 	hi := Instruction{MOVHI, cast(u16)rd, u16(p1 >> 48),       u16(p1 << 16 >> 48)};
 	lo := Instruction{MOVLO, cast(u16)rd, u16(p1 << 32 >> 48), u16(p1 << 48 >> 48)};
-	append(&instructions_human, hi);
-	append(&instructions_human, lo);
+	append(&instructions_readable, hi);
+	append(&instructions_readable, lo);
 }
 moviu :: inline proc(using vm: ^VM, rd: Register, p1: u64) {
 	hi := Instruction{MOVHI, cast(u16)rd, u16(p1 >> 48),       u16(p1 << 16 >> 48)};
 	lo := Instruction{MOVLO, cast(u16)rd, u16(p1 << 32 >> 48), u16(p1 << 48 >> 48)};
-	append(&instructions_human, hi);
-	append(&instructions_human, lo);
+	append(&instructions_readable, hi);
+	append(&instructions_readable, lo);
 }
 movif :: inline proc(using vm: ^VM, rd: Register, p1: f64) {
 	hihi := u16((transmute(u64)p1 & HIHI_BITS_64) >> 48);
@@ -493,8 +493,8 @@ movif :: inline proc(using vm: ^VM, rd: Register, p1: f64) {
 	lolo := u16((transmute(u64)p1 & LOLO_BITS_64) >>  0);
 	hi := Instruction{MOVHI, cast(u16)rd, hihi, hilo};
 	lo := Instruction{MOVLO, cast(u16)rd, lohi, lolo};
-	append(&instructions_human, hi);
-	append(&instructions_human, lo);
+	append(&instructions_readable, hi);
+	append(&instructions_readable, lo);
 }
 
 shli :: inline proc(using vm: ^VM, rd: Register, p1: u64) {
@@ -518,7 +518,7 @@ xori :: inline proc(using vm: ^VM, rd, r1: Register, p2: u64) {
 	xor(vm, rd, r1, rim);
 }
 label :: inline proc(using vm: ^VM, str: string) {
-	instruction_pointer := cast(u64)len(instructions_human);
+	instruction_pointer := cast(u64)len(instructions_readable);
 	_, ok := label_to_ip[str];
 	assert(!ok, tprint("Already have label: ", str));
 	label_to_ip[str] = instruction_pointer;
