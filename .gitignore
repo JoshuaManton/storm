@@ -1,0 +1,6 @@
+*.obj
+*.ll
+*.pdb
+*.bc
+*.exe
+*.suo
