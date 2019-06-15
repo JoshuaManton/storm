@@ -11,30 +11,17 @@ main :: proc() {
 }
 
 test_main :: proc() {
-	encode_test();
 	break_test();
 	immediate_test();
 	signed_test();
 	unsigned_test();
 	float_test();
-	bit_test();
-	jump_test();
-	call_test();
-	factorial_test();
-	save_load_test();
-	parse_test();
-}
-
-encode_test :: proc() {
-	println(#procedure);
-	inst := Instruction{.QUIT, 1, 4, 9};
-	op := encode(inst);
-	inst = decode(op);
-
-	assert(inst.kind == .QUIT);
-	assert(inst.p1   == 1);
-	assert(inst.p2   == 4);
-	assert(inst.p3   == 9);
+	// bit_test();
+	// jump_test();
+	// call_test();
+	// factorial_test();
+	// save_load_test();
+	// parse_test();
 }
 
 break_test :: proc() {
@@ -68,8 +55,8 @@ immediate_test :: proc() {
 	vm: VM;
 	defer destroy_vm(&vm);
 
-	movi(&vm, 1, -5);
-	movi(&vm, 2, 3);
+	movis(&vm, 1, -5);
+	movis(&vm, 2, 3);
 	addi(&vm, 3, 1, 2);
 	addi(&vm, 4, 1, -8);
 
@@ -86,7 +73,7 @@ signed_test :: proc() {
 	vm: VM;
 	defer destroy_vm(&vm);
 
-	movi(&vm, 1, -5);
+	movis(&vm, 1, -5);
 	movi(&vm, 2, 3);
 	add(&vm, 3, 1, 2);
 	sub(&vm, 4, 1, 2);
@@ -110,8 +97,8 @@ unsigned_test :: proc() {
 	vm: VM;
 	defer destroy_vm(&vm);
 
-	moviu(&vm, 1, 5);
-	moviu(&vm, 2, 3);
+	movi(&vm, 1, 5);
+	movi(&vm, 2, 3);
 	addu(&vm, 3, 1, 2);
 	subu(&vm, 4, 1, 2);
 	mulu(&vm, 5, 1, 2);
@@ -156,8 +143,8 @@ bit_test :: proc() {
 	vm: VM;
 	defer destroy_vm(&vm);
 
-	moviu(&vm, 1, 11);
-	moviu(&vm, 2, 3);
+	movi(&vm, 1, 11);
+	movi(&vm, 2, 3);
 	shl(&vm, 3, 1, 2);
 	shr(&vm, 4, 1, 2);
 	and(&vm, 5, 1, 2);
@@ -181,27 +168,27 @@ jump_test :: proc() {
 	// vm.do_print_registers = true;
 	defer destroy_vm(&vm);
 
-	movi(&vm, 1, 11);
-	movi(&vm, 2, -15);
-	movi(&vm, 3, 0);
-	movi(&vm, 4, 0);
-	movi(&vm, 5, 0);
-	movi(&vm, 6, 0);
+	movis(&vm, 1, 11);
+	movis(&vm, 2, -15);
+	movis(&vm, 3, 0);
+	movis(&vm, 4, 0);
+	movis(&vm, 5, 0);
+	movis(&vm, 6, 0);
 
 	jeq(&vm, "jeq_skip", 1, 2);
-	movi(&vm, 3, 1);
+	movis(&vm, 3, 1);
 	label(&vm, "jeq_skip");
 
 	jne(&vm, "jne_skip", 1, 2);
-	movi(&vm, 4, 1);
+	movis(&vm, 4, 1);
 	label(&vm, "jne_skip");
 
 	jlt(&vm, "jlt_skip", 1, 2);
-	movi(&vm, 5, 1);
+	movis(&vm, 5, 1);
 	label(&vm, "jlt_skip");
 
 	jge(&vm, "jge_skip", 1, 2);
-	movi(&vm, 6, 1);
+	movis(&vm, 6, 1);
 	label(&vm, "jge_skip");
 
 	execute(&vm);
@@ -240,13 +227,13 @@ call_test :: proc() {
 	defer destroy_vm(&vm);
 
 	label(&vm, "start");
-	moviu(&vm, 1, 5);    // original data
-	moviu(&vm, 2, 3);    // original data
+	movi(&vm, 1, 5);    // original data
+	movi(&vm, 2, 3);    // original data
 	stack_push(&vm, 1);  // save original data
 	stack_push(&vm, 2);  // save original data
 
-	moviu(&vm, 1, 12);   // put parameter in
-	moviu(&vm, 2, 7);    // put parameter in
+	movi(&vm, 1, 12);   // put parameter in
+	movi(&vm, 2, 7);    // put parameter in
 	call(&vm, "foo");     // call foo
 	stack_pop(&vm, 2);   // restore original data
 	stack_pop(&vm, 1);   // restore original data
@@ -321,7 +308,7 @@ save_load_test :: proc() {
 	movi(&vm, 2, 6);
 	movi(&vm, 3, 7);
 	movi(&vm, 4, 8);
-	movi(&vm, 5, ~i64(0));
+	movi(&vm, 5, ~u64(0));
 	sv64(&vm, 1, 5);
 	sv32(&vm, 2, 5);
 	sv16(&vm, 3, 5);
