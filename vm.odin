@@ -23,9 +23,9 @@ Label_Reference :: struct {
 }
 DEBUG_MODE :: true;
 
-NUM_REGISTERS    :: 1024;
-STACK_SIZE       :: 1024;
-MAIN_MEMORY_SIZE :: 1024;
+NUM_REGISTERS    :: 20;
+STACK_SIZE       :: 20;
+MAIN_MEMORY_SIZE :: 20;
 VM :: struct {
 	instructions:         [dynamic]Instruction,
 	stack_memory:         [STACK_SIZE]u64,
@@ -44,13 +44,7 @@ patch_labels :: proc(vm: ^VM) {
 		ip, ok := vm.label_to_ip[ref.str];
 		assert(ok, ref.str);
 
-		hi := &vm.instructions[ref.ip];
-		lo := &vm.instructions[ref.ip+1];
-
-		hi.p2 = ((ip & HIHI_BITS_64) >> 48);
-		hi.p3 = ((ip & HILO_BITS_64) >> 32);
-		lo.p2 = ((ip & LOHI_BITS_64) >> 16);
-		lo.p3 = ((ip & LOLO_BITS_64) >>  0);
+		vm.instructions[ref.ip].p2 = ip;
 	}
 }
 
@@ -60,6 +54,8 @@ execute :: proc(vm: ^VM) {
 	when DEBUG_MODE {
 		vm.instruction_hit_counts = make([dynamic]int, len(vm.instructions));
 	}
+
+	for i in vm.instructions do println("Instruction: ", i);
 
 	for step(vm) {
 	}
@@ -75,21 +71,22 @@ step :: proc(using vm: ^VM) -> bool {
 	if register_memory[rip] >= cast(u64)len(instructions) do return false;
 
 	instruction := instructions[register_memory[rip]];
+	println(register_memory[rip], instruction);
+
 	register_memory[rip] += 1;
 
 	switch cast(Instruction_Type)instruction.kind {
 		case .MOV:  register_memory[instruction.p1] = register_memory[instruction.p2];
 		case .MOVI: register_memory[instruction.p1] = instruction.p2;
 		case .PUSH:
-			register_memory[rsp] += 1;
 			stack_memory[register_memory[rsp]] = register_memory[instruction.p1];
+			register_memory[rsp] += 1;
 		case .POP:
+			register_memory[rsp] -= 1;
 			register_memory[instruction.p1] = stack_memory[register_memory[rsp]];
-
 			when DEBUG_MODE {
 				stack_memory[register_memory[rsp]] = 0;
 			}
-			register_memory[rsp] -= 1;
 
 		case .GOTO:     register_memory[rip] = register_memory[rj];
 		case .JEQ:      if register_memory[instruction.p2] == register_memory[instruction.p3] do register_memory[rip] = register_memory[rj];
@@ -142,8 +139,8 @@ step :: proc(using vm: ^VM) -> bool {
 		case:          assert(false, aprint(instruction.kind));
 	}
 
-	println(instruction);
-	println(register_memory[0:10]);
+	println(register_memory);
+	println(stack_memory);
 
 	return true;
 }
@@ -235,205 +232,165 @@ HILO_BITS_64 :: 0x0000FFFF00000000;
 LOHI_BITS_64 :: 0x00000000FFFF0000;
 LOLO_BITS_64 :: 0x000000000000FFFF;
 
-quit :: inline proc(using vm: ^VM) {
-	inst := Instruction{.QUIT, 0, 0, 0};
+add_instruction :: proc(using vm: ^VM, inst: Instruction) {
 	append(&instructions, inst);
 }
+
+quit :: inline proc(using vm: ^VM) {
+	add_instruction(vm, Instruction{.QUIT, 0, 0, 0});
+}
 brk :: inline proc(using vm: ^VM) {
-	inst := Instruction{.BREAK, 0, 0, 0};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.BREAK, 0, 0, 0});
 }
 goto :: inline proc(using vm: ^VM, str: string) {
 	ref := Label_Reference{cast(u64)len(instructions), str};
 	append(&label_references, ref);
 	movi(vm, rj, 0); // will be backpatched
-	inst := Instruction{.GOTO, 0, 0, 0};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.GOTO, 0, 0, 0});
 }
 
 mov :: inline proc(using vm: ^VM, rd, p1: Register) {
-	inst := Instruction{.MOV, rd, p1, 0};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.MOV, rd, p1, 0});
 }
 movi :: inline proc(using vm: ^VM, rd: Register, p1: u64) {
-	inst := Instruction{.MOVI, rd, p1, 0};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.MOVI, rd, p1, 0});
 }
 
 jeq :: inline proc(using vm: ^VM, str: string, r1, r2: Register) {
 	ref := Label_Reference{cast(u64)len(instructions), str};
 	append(&label_references, ref);
 	movi(vm, rj, 0); // will be backpatched
-	inst := Instruction{.JEQ, 0, r1, r2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.JEQ, 0, r1, r2});
 }
 jne :: inline proc(using vm: ^VM, str: string, r1, r2: Register) {
 	ref := Label_Reference{cast(u64)len(instructions), str};
 	append(&label_references, ref);
 	movi(vm, rj, 0); // will be backpatched
-	inst := Instruction{.JNE, 0, r1, r2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.JNE, 0, r1, r2});
 }
 jlt :: inline proc(using vm: ^VM, str: string, r1, r2: Register) {
 	ref := Label_Reference{cast(u64)len(instructions), str};
 	append(&label_references, ref);
 	movi(vm, rj, 0); // will be backpatched
-	inst := Instruction{.JLT, 0, r1, r2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.JLT, 0, r1, r2});
 }
 jge :: inline proc(using vm: ^VM, str: string, r1, r2: Register) {
 	ref := Label_Reference{cast(u64)len(instructions), str};
 	append(&label_references, ref);
 	movi(vm, rj, 0); // will be backpatched
-	inst := Instruction{.JGE, 0, r1, r2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.JGE, 0, r1, r2});
 }
 jltu :: inline proc(using vm: ^VM, str: string, r1, r2: Register) {
 	ref := Label_Reference{cast(u64)len(instructions), str};
 	append(&label_references, ref);
 	movi(vm, rj, 0); // will be backpatched
-	inst := Instruction{.JLTU, 0, r1, r2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.JLTU, 0, r1, r2});
 }
 jgeu :: inline proc(using vm: ^VM, str: string, r1, r2: Register) {
 	ref := Label_Reference{cast(u64)len(instructions), str};
 	append(&label_references, ref);
 	movi(vm, rj, 0); // will be backpatched
-	inst := Instruction{.JGEU, 0, r1, r2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.JGEU, 0, r1, r2});
 }
 eq :: inline proc(using vm: ^VM, rd, r1, r2: Register) {
-	inst := Instruction{.EQ, rd, r1, r2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.EQ, rd, r1, r2});
 }
 
 sv8 :: inline proc(using vm: ^VM, p1, p2: Register) {
-	inst := Instruction{.SV8, p1, p2, 0};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.SV8, p1, p2, 0});
 }
 sv16 :: inline proc(using vm: ^VM, p1, p2: Register) {
-	inst := Instruction{.SV16, p1, p2, 0};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.SV16, p1, p2, 0});
 }
 sv32 :: inline proc(using vm: ^VM, p1, p2: Register) {
-	inst := Instruction{.SV32, p1, p2, 0};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.SV32, p1, p2, 0});
 }
 sv64 :: inline proc(using vm: ^VM, p1, p2: Register) {
-	inst := Instruction{.SV64, p1, p2, 0};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.SV64, p1, p2, 0});
 }
 ld8 :: inline proc(using vm: ^VM, p1, p2: Register) {
-	inst := Instruction{.LD8, p1, p2, 0};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.LD8, p1, p2, 0});
 }
 ld16 :: inline proc(using vm: ^VM, p1, p2: Register) {
-	inst := Instruction{.LD16, p1, p2, 0};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.LD16, p1, p2, 0});
 }
 ld32 :: inline proc(using vm: ^VM, p1, p2: Register) {
-	inst := Instruction{.LD32, p1, p2, 0};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.LD32, p1, p2, 0});
 }
 ld64 :: inline proc(using vm: ^VM, p1, p2: Register) {
-	inst := Instruction{.LD64, p1, p2, 0};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.LD64, p1, p2, 0});
 }
 add :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.ADD, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.ADD, rd, p1, p2});
 }
 addi :: inline proc(using vm: ^VM, rd, p1: Register, p2: i64) {
-	inst := Instruction{.ADDI, rd, p1, transmute(u64)p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.ADDI, rd, p1, transmute(u64)p2});
 }
 sub :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.SUB, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.SUB, rd, p1, p2});
 }
 mul :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.MUL, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.MUL, rd, p1, p2});
 }
 div :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.DIV, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.DIV, rd, p1, p2});
 }
 mod :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.MOD, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.MOD, rd, p1, p2});
 }
 modmod :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.MODMOD, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.MODMOD, rd, p1, p2});
 }
 addu :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.ADDU, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.ADDU, rd, p1, p2});
 }
 subu :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.SUBU, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.SUBU, rd, p1, p2});
 }
 mulu :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.MULU, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.MULU, rd, p1, p2});
 }
 divu :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.DIVU, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.DIVU, rd, p1, p2});
 }
 modu :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.MODU, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.MODU, rd, p1, p2});
 }
 modmodu :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.MODMODU, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.MODMODU, rd, p1, p2});
 }
 addf :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.ADDF, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.ADDF, rd, p1, p2});
 }
 subf :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.SUBF, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.SUBF, rd, p1, p2});
 }
 mulf :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.MULF, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.MULF, rd, p1, p2});
 }
 divf :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.DIVF, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.DIVF, rd, p1, p2});
 }
 shl :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.SHL, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.SHL, rd, p1, p2});
 }
 shr :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.SHR, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.SHR, rd, p1, p2});
 }
 and :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.AND, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.AND, rd, p1, p2});
 }
 or :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.OR, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.OR, rd, p1, p2});
 }
 xor :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
-	inst := Instruction{.XOR, rd, p1, p2};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.XOR, rd, p1, p2});
 }
 stack_push :: inline proc(using vm: ^VM, r1: Register) {
-	inst := Instruction{.PUSH, r1, 0, 0};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.PUSH, r1, 0, 0});
 }
 stack_pop :: inline proc(using vm: ^VM, r1: Register) {
-	inst := Instruction{.POP, r1, 0, 0};
-	append(&instructions, inst);
+	add_instruction(vm, Instruction{.POP, r1, 0, 0});
 }
 
 // PSEUDOINSTRUCTIONS
@@ -446,8 +403,8 @@ call :: inline proc(using vm: ^VM, str: string) {
 	mov(vm, rip, rj);
 }
 ret :: inline proc(using vm: ^VM) {
-	stack_pop(vm, rt);
-	addi(vm, rt, rt, 1);
+	// stack_pop(vm, rt);
+	// addi(vm, rt, rt, 1);
 	mov(vm, rip, rt);
 }
 
@@ -457,23 +414,6 @@ movis :: inline proc(using vm: ^VM, rd: Register, p1: i64) {
 movif :: inline proc(using vm: ^VM, rd: Register, p1: f64) {
 	movi(vm, rd, transmute(u64)p1);
 }
-// movi :: inline proc(using vm: ^VM, rd: Register, p1: u64) {
-// 	movi(vm, rd, p1);
-// 	hi := Instruction{.MOVHI, rd, p1 >> 48,       p1 << 16 >> 48};
-// 	lo := Instruction{.MOVLO, rd, p1 << 32 >> 48, p1 << 48 >> 48};
-// 	append(&instructions, hi);
-// 	append(&instructions, lo);
-// }
-// movif :: inline proc(using vm: ^VM, rd: Register, p1: f64) {
-// 	hihi := (transmute(u64)p1 & HIHI_BITS_64) >> 48;
-// 	hilo := (transmute(u64)p1 & HILO_BITS_64) >> 32;
-// 	lohi := (transmute(u64)p1 & LOHI_BITS_64) >> 16;
-// 	lolo := (transmute(u64)p1 & LOLO_BITS_64) >>  0;
-// 	hi := Instruction{.MOVHI, rd, hihi, hilo};
-// 	lo := Instruction{.MOVLO, rd, lohi, lolo};
-// 	append(&instructions, hi);
-// 	append(&instructions, lo);
-// }
 
 shli :: inline proc(using vm: ^VM, rd: Register, p1: u64) {
 	movi(vm, rim, p1);
@@ -499,6 +439,5 @@ label :: inline proc(using vm: ^VM, str: string) {
 	instruction_pointer := cast(u64)len(instructions);
 	_, ok := label_to_ip[str];
 	assert(!ok, tprint("Already have label: ", str));
-	println(str);
 	label_to_ip[str] = instruction_pointer;
 }
