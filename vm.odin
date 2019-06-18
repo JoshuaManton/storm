@@ -5,12 +5,11 @@ using import "core:fmt"
 
 Register :: u64;
 
-rr  :: NUM_REGISTERS-1;
-rip :: NUM_REGISTERS-2;
-rsp :: NUM_REGISTERS-3;
-rj  :: NUM_REGISTERS-4;
-rt  :: NUM_REGISTERS-5;
-rim :: NUM_REGISTERS-6;
+rip :: NUM_REGISTERS-1;
+rsp :: NUM_REGISTERS-2;
+rj  :: NUM_REGISTERS-3;
+rim :: NUM_REGISTERS-4;
+rz  :: NUM_REGISTERS-5;
 
 Instruction :: struct {
 	kind: Instruction_Type,
@@ -23,9 +22,9 @@ Label_Reference :: struct {
 }
 DEBUG_MODE :: true;
 
-NUM_REGISTERS    :: 20;
-STACK_SIZE       :: 20;
-MAIN_MEMORY_SIZE :: 20;
+NUM_REGISTERS    :: 50;
+STACK_SIZE       :: 2048;
+MAIN_MEMORY_SIZE :: 50;
 VM :: struct {
 	instructions:         [dynamic]Instruction,
 	stack_memory:         [STACK_SIZE]u64,
@@ -55,7 +54,8 @@ execute :: proc(vm: ^VM) {
 		vm.instruction_hit_counts = make([dynamic]int, len(vm.instructions));
 	}
 
-	for i in vm.instructions do println("Instruction: ", i);
+	println("Generated", len(vm.instructions), "Instructions");
+	// for i in vm.instructions do println("Instruction:", i);
 
 	for step(vm) {
 	}
@@ -71,7 +71,7 @@ step :: proc(using vm: ^VM) -> bool {
 	if register_memory[rip] >= cast(u64)len(instructions) do return false;
 
 	instruction := instructions[register_memory[rip]];
-	println(register_memory[rip], instruction);
+	// println(register_memory[rip], instruction);
 
 	register_memory[rip] += 1;
 
@@ -81,6 +81,7 @@ step :: proc(using vm: ^VM) -> bool {
 		case .PUSH:
 			stack_memory[register_memory[rsp]] = register_memory[instruction.p1];
 			register_memory[rsp] += 1;
+
 		case .POP:
 			register_memory[rsp] -= 1;
 			register_memory[instruction.p1] = stack_memory[register_memory[rsp]];
@@ -88,15 +89,15 @@ step :: proc(using vm: ^VM) -> bool {
 				stack_memory[register_memory[rsp]] = 0;
 			}
 
-		case .GOTO:     register_memory[rip] = register_memory[rj];
 		case .JEQ:      if register_memory[instruction.p2] == register_memory[instruction.p3] do register_memory[rip] = register_memory[rj];
+		case .JEZ:      if register_memory[instruction.p2] == 0                               do register_memory[rip] = register_memory[rj];
 		case .JNE:      if register_memory[instruction.p2] != register_memory[instruction.p3] do register_memory[rip] = register_memory[rj];
 		case .JLT:      if transmute(i64)register_memory[instruction.p2] <  transmute(i64)register_memory[instruction.p3] do register_memory[rip] = register_memory[rj];
 		case .JGE:      if transmute(i64)register_memory[instruction.p2] >= transmute(i64)register_memory[instruction.p3] do register_memory[rip] = register_memory[rj];
 		case .JLTU:     if register_memory[instruction.p2] <  register_memory[instruction.p3] do register_memory[rip] = register_memory[rj];
 		case .JGEU:     if register_memory[instruction.p2] >= register_memory[instruction.p3] do register_memory[rip] = register_memory[rj];
 
-		case .EQ:       register_memory[instruction.p1] = cast(u64)(register_memory[instruction.p1] == register_memory[instruction.p2]);
+		case .EQ:       register_memory[instruction.p1] = (register_memory[instruction.p2] == register_memory[instruction.p3] ? 1 : 0);
 
 		case .SV8:      main_memory[register_memory[instruction.p1]] = cast(u64)cast( u8)register_memory[instruction.p2];
 		case .SV16:     main_memory[register_memory[instruction.p1]] = cast(u64)cast(u16)register_memory[instruction.p2];
@@ -139,8 +140,10 @@ step :: proc(using vm: ^VM) -> bool {
 		case:          assert(false, aprint(instruction.kind));
 	}
 
-	println(register_memory);
-	println(stack_memory);
+	register_memory[rz] = 0;
+
+	// println(register_memory[:20]);
+	// println(stack_memory[:register_memory[rsp]]);
 
 	return true;
 }
@@ -190,9 +193,9 @@ when DEBUG_MODE {
 Instruction_Type :: enum u16 {
 	INVALID,
 
-	QUIT, BREAK, GOTO,
+	QUIT, BREAK,
 
-	JUMP, JEQ, JNE, JLT, JGE, JLTU, JGEU,
+	JUMP, JEQ, JEZ, JNE, JLT, JGE, JLTU, JGEU,
 
 	EQ,
 
@@ -242,12 +245,6 @@ quit :: inline proc(using vm: ^VM) {
 brk :: inline proc(using vm: ^VM) {
 	add_instruction(vm, Instruction{.BREAK, 0, 0, 0});
 }
-goto :: inline proc(using vm: ^VM, str: string) {
-	ref := Label_Reference{cast(u64)len(instructions), str};
-	append(&label_references, ref);
-	movi(vm, rj, 0); // will be backpatched
-	add_instruction(vm, Instruction{.GOTO, 0, 0, 0});
-}
 
 mov :: inline proc(using vm: ^VM, rd, p1: Register) {
 	add_instruction(vm, Instruction{.MOV, rd, p1, 0});
@@ -261,6 +258,12 @@ jeq :: inline proc(using vm: ^VM, str: string, r1, r2: Register) {
 	append(&label_references, ref);
 	movi(vm, rj, 0); // will be backpatched
 	add_instruction(vm, Instruction{.JEQ, 0, r1, r2});
+}
+jez :: inline proc(using vm: ^VM, str: string, r1: Register) {
+	ref := Label_Reference{cast(u64)len(instructions), str};
+	append(&label_references, ref);
+	movi(vm, rj, 0); // will be backpatched
+	add_instruction(vm, Instruction{.JEZ, 0, r1, 0});
 }
 jne :: inline proc(using vm: ^VM, str: string, r1, r2: Register) {
 	ref := Label_Reference{cast(u64)len(instructions), str};
@@ -396,17 +399,17 @@ stack_pop :: inline proc(using vm: ^VM, r1: Register) {
 // PSEUDOINSTRUCTIONS
 
 call :: inline proc(using vm: ^VM, str: string) {
+	stack_push(vm, rip);
+
 	ref := Label_Reference{cast(u64)len(instructions), str};
 	append(&label_references, ref);
-	movi(vm, rj, 0); // will be backpatched
-	stack_push(vm, rip);
-	mov(vm, rip, rj);
+	movi(vm, rip, 0); // will be backpatched
 }
-ret :: inline proc(using vm: ^VM) {
-	// stack_pop(vm, rt);
-	// addi(vm, rt, rt, 1);
-	mov(vm, rip, rt);
-}
+// ret :: inline proc(using vm: ^VM) {
+// 	// stack_pop(vm, rt);
+// 	// addi(vm, rt, rt, 1);
+// 	mov(vm, rip, rt);
+// }
 
 movis :: inline proc(using vm: ^VM, rd: Register, p1: i64) {
 	movi(vm, rd, transmute(u64)p1);
