@@ -71,7 +71,7 @@ step :: proc(using vm: ^VM) -> bool {
 	if register_memory[rip] >= cast(u64)len(instructions) do return false;
 
 	instruction := instructions[register_memory[rip]];
-	// println(register_memory[rip], instruction);
+	println(register_memory[rip], instruction);
 
 	register_memory[rip] += 1;
 
@@ -142,8 +142,8 @@ step :: proc(using vm: ^VM) -> bool {
 
 	register_memory[rz] = 0;
 
-	// println(register_memory[:20]);
-	// println(stack_memory[:register_memory[rsp]]);
+	println(register_memory[:20]);
+	println(stack_memory[:register_memory[rsp]]);
 
 	return true;
 }
