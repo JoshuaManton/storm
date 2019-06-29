@@ -26,10 +26,10 @@ NUM_REGISTERS    :: 50;
 STACK_SIZE       :: 2048;
 MAIN_MEMORY_SIZE :: 50;
 VM :: struct {
-	instructions:         [dynamic]Instruction,
-	stack_memory:         [STACK_SIZE]u64,
-	register_memory:      [NUM_REGISTERS]u64,
-	main_memory:          [MAIN_MEMORY_SIZE]u64,
+	instructions:    [dynamic]Instruction,
+	stack_memory:    [STACK_SIZE]u64,
+	register_memory: [NUM_REGISTERS]u64,
+	main_memory:     [MAIN_MEMORY_SIZE]u64,
 
 	do_print_registers: bool,
 	instruction_hit_counts: [dynamic]int,
