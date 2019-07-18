@@ -20,7 +20,7 @@ VM :: struct {
 	label_references: [dynamic]Label_Reference,
 	label_to_ip: map[string]u64,
 }
-STACK_SIZE :: 128;
+STACK_SIZE :: 512;
 
 Instruction :: struct {
 	kind: Instruction_Type,
@@ -73,6 +73,7 @@ patch_labels :: proc(vm: ^VM) {
 	}
 }
 
+PRINT_STUFF :: false;
 execute :: proc(using vm: ^VM) {
 	patch_labels(vm);
 
@@ -80,14 +81,19 @@ execute :: proc(using vm: ^VM) {
 		vm.instruction_hit_counts = make([dynamic]int, len(vm.instructions));
 	}
 
-	println("Generated", len(vm.instructions), "Instructions");
+	if PRINT_STUFF {
+		println("Generated", len(vm.instructions), "Instructions");
+	}
 
 	instruction_loop: for {
 		if registers[reg(.rip)] >= cast(u64)len(instructions) do break;
 
 		instruction := instructions[registers[reg(.rip)]];
-		print("\n");
-		println(registers[reg(.rip)], instruction);
+
+		if PRINT_STUFF {
+			print("\n");
+			println(registers[reg(.rip)], instruction);
+		}
 
 		increment_ip := true;
 
@@ -118,13 +124,12 @@ execute :: proc(using vm: ^VM) {
 			case .PUSH32F: (cast(^f32)&memory[registers[reg(.rsp)]])^ = cast(f32)transmute(f64)registers[instruction.p1]; registers[reg(.rsp)] += 4; assert(registers[reg(.rsp)] < STACK_SIZE);
 			case .PUSH64F: (cast(^f64)&memory[registers[reg(.rsp)]])^ = cast(f64)transmute(f64)registers[instruction.p1]; registers[reg(.rsp)] += 8; assert(registers[reg(.rsp)] < STACK_SIZE);
 
-			case .JEQ:      if registers[instruction.p2] == registers[instruction.p3] do registers[reg(.rip)] = registers[reg(.rj)]; increment_ip = false;
-			case .JEZ:      if registers[instruction.p2] == 0                         do registers[reg(.rip)] = registers[reg(.rj)]; increment_ip = false;
-			case .JNE:      if registers[instruction.p2] != registers[instruction.p3] do registers[reg(.rip)] = registers[reg(.rj)]; increment_ip = false;
-			case .JLT:      if transmute(i64)registers[instruction.p2] <  transmute(i64)registers[instruction.p3] do registers[reg(.rip)] = registers[reg(.rj)]; increment_ip = false;
-			case .JGE:      if transmute(i64)registers[instruction.p2] >= transmute(i64)registers[instruction.p3] do registers[reg(.rip)] = registers[reg(.rj)]; increment_ip = false;
-			case .JLTU:     if registers[instruction.p2] <  registers[instruction.p3] do registers[reg(.rip)] = registers[reg(.rj)]; increment_ip = false;
-			case .JGEU:     if registers[instruction.p2] >= registers[instruction.p3] do registers[reg(.rip)] = registers[reg(.rj)]; increment_ip = false;
+			case .JEQ:      if registers[instruction.p2] == registers[instruction.p3]                             { registers[reg(.rip)] = registers[reg(.rj)]; increment_ip = false; }
+			case .JNE:      if registers[instruction.p2] != registers[instruction.p3]                             { registers[reg(.rip)] = registers[reg(.rj)]; increment_ip = false; }
+			case .JLT:      if transmute(i64)registers[instruction.p2] <  transmute(i64)registers[instruction.p3] { registers[reg(.rip)] = registers[reg(.rj)]; increment_ip = false; }
+			case .JGE:      if transmute(i64)registers[instruction.p2] >= transmute(i64)registers[instruction.p3] { registers[reg(.rip)] = registers[reg(.rj)]; increment_ip = false; }
+			case .JLTU:     if registers[instruction.p2] <  registers[instruction.p3]                             { registers[reg(.rip)] = registers[reg(.rj)]; increment_ip = false; }
+			case .JGEU:     if registers[instruction.p2] >= registers[instruction.p3]                             { registers[reg(.rip)] = registers[reg(.rj)]; increment_ip = false; }
 
 			case .GOTO:     registers[reg(.rip)] = instruction.p2; increment_ip = false;
 
@@ -191,8 +196,10 @@ execute :: proc(using vm: ^VM) {
 
 		registers[reg(.rz)] = 0;
 
-		println(tprint("registers: ", registers));
-		println(tprint("stack:     ", memory[:registers[reg(.rsp)]]));
+		if PRINT_STUFF {
+			println(tprint("registers: ", registers));
+			println(tprint("stack:     ", memory[:registers[reg(.rsp)]]));
+		}
 
 		if increment_ip {
 			registers[reg(.rip)] += 1;
@@ -211,7 +218,7 @@ Instruction_Type :: enum u16 {
 
 	QUIT, BREAK,
 
-	JUMP, JEQ, JEZ, JNE, JLT, JGE, JLTU, JGEU,
+	JUMP, JEQ, JNE, JLT, JGE, JLTU, JGEU,
 
 	GOTO,
 
@@ -296,12 +303,6 @@ jeq :: inline proc(using vm: ^VM, str: string, r1, r2: Register) {
 	append(&label_references, ref);
 	movuim(vm, .rj, 0); // will be backpatched
 	add_instruction(vm, Instruction{.JEQ, 0, cast(u64)r1, cast(u64)r2});
-}
-jez :: inline proc(using vm: ^VM, str: string, r1: Register) {
-	ref := Label_Reference{cast(u64)len(instructions), str};
-	append(&label_references, ref);
-	movuim(vm, .rj, 0); // will be backpatched
-	add_instruction(vm, Instruction{.JEZ, 0, cast(u64)r1, 0});
 }
 jne :: inline proc(using vm: ^VM, str: string, r1, r2: Register) {
 	ref := Label_Reference{cast(u64)len(instructions), str};
@@ -721,10 +722,10 @@ parse_and_execute :: proc(code: string, out_vm: ^VM) {
 						pop64f(vm, dst);
 					}
 					case "jeq": {
-						unimplemented("jeq");
-					}
-					case "jez": {
-						unimplemented("jez");
+						jump_target := parse_identifier(&lexer);
+						r1 := parse_register(&lexer);
+						r2 := parse_register(&lexer);
+						jeq(vm, jump_target, r1, r2);
 					}
 					case "jne": {
 						unimplemented("jne");
@@ -751,7 +752,10 @@ parse_and_execute :: proc(code: string, out_vm: ^VM) {
 						goto(vm, ident.value);
 					}
 					case "eq": {
-						unimplemented("eq");
+						dst := parse_register(&lexer);
+						r1 := parse_register(&lexer);
+						r2 := parse_register(&lexer);
+						eq(vm, dst, r1, r2);
 					}
 					case "sv8u": {
 						dst := parse_register(&lexer);
@@ -1104,4 +1108,13 @@ parse_number :: proc(lexer: ^Lexer, $Type: typeid, loc := #caller_location) -> T
 
 	panic(tprint(type_info_of(Type)));
 	return {};
+}
+
+parse_identifier :: proc(lexer: ^Lexer) -> string {
+	token: Token;
+	ok := get_next_token(lexer, &token);
+	assert(ok, tprint("Expected identifier, got", token));
+	ident, ok2 := token.kind.(Identifier);
+	assert(ok2, tprint("Expected identifier, got", token.kind));
+	return ident.value;
 }
