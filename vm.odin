@@ -34,7 +34,7 @@ Label_Reference :: struct {
 Register :: enum {
 	r1,  r2,  r3,  r4,
 	r5,  r6,  r7,  r8,
-	r9,  r10, rbp, rim,
+	r9,  r10, rfp, rim,
 	rj,  rip, rsp, rz,
 }
 
@@ -54,7 +54,7 @@ reg_from_name :: proc(name: string) -> (Register, bool) {
 		case "r8":  return .r8, true;
 		case "r9":  return .r9, true;
 		case "r10": return .r10, true;
-		case "rbp": return .rbp, true;
+		case "rfp": return .rfp, true;
 		case "rim": return .rim, true;
 		case "rj":  return .rj, true;
 		case "rip": return .rip, true;
@@ -81,12 +81,12 @@ execute :: proc(using vm: ^VM) {
 	}
 
 	println("Generated", len(vm.instructions), "Instructions");
-	// for i in vm.instructions do println("Instruction:", i);
 
 	instruction_loop: for {
 		if registers[reg(.rip)] >= cast(u64)len(instructions) do break;
 
 		instruction := instructions[registers[reg(.rip)]];
+		print("\n");
 		println(registers[reg(.rip)], instruction);
 
 		increment_ip := true;
@@ -94,26 +94,29 @@ execute :: proc(using vm: ^VM) {
 		switch cast(Instruction_Type)instruction.kind {
 			case .MOV:     registers[instruction.p1] = registers[instruction.p2];
 			case .MOVIM:   registers[instruction.p1] = instruction.p2;
-			case .PUSH:
-				switch instruction.p2 {
-					case 1: (cast(^u8 )&memory[registers[reg(.rsp)]])^ = cast(u8 )registers[instruction.p1];
-					case 2: (cast(^u16)&memory[registers[reg(.rsp)]])^ = cast(u16)registers[instruction.p1];
-					case 4: (cast(^u32)&memory[registers[reg(.rsp)]])^ = cast(u32)registers[instruction.p1];
-					case 8: (cast(^u64)&memory[registers[reg(.rsp)]])^ = cast(u64)registers[instruction.p1];
-					case: panic(tprint(instruction.p2));
-				}
-				registers[reg(.rsp)] += instruction.p2;
-				assert(registers[reg(.rsp)] < STACK_SIZE);
 
-			case .POP:
-				registers[reg(.rsp)] -= instruction.p2;
-				switch instruction.p2 {
-					case 1: registers[instruction.p1] = cast(u64)cast(u8 )memory[registers[reg(.rsp)]];
-					case 2: registers[instruction.p1] = cast(u64)cast(u16)memory[registers[reg(.rsp)]];
-					case 4: registers[instruction.p1] = cast(u64)cast(u32)memory[registers[reg(.rsp)]];
-					case 8: registers[instruction.p1] = cast(u64)cast(u64)memory[registers[reg(.rsp)]];
-					case: panic(tprint(instruction.p2));
-				}
+			case .PUSH8U:  (cast(^u8 )&memory[registers[reg(.rsp)]])^ = cast(u8 )transmute(u64)registers[instruction.p1]; registers[reg(.rsp)] += 1; assert(registers[reg(.rsp)] < STACK_SIZE);
+			case .PUSH16U: (cast(^u16)&memory[registers[reg(.rsp)]])^ = cast(u16)transmute(u64)registers[instruction.p1]; registers[reg(.rsp)] += 2; assert(registers[reg(.rsp)] < STACK_SIZE);
+			case .PUSH32U: (cast(^u32)&memory[registers[reg(.rsp)]])^ = cast(u32)transmute(u64)registers[instruction.p1]; registers[reg(.rsp)] += 4; assert(registers[reg(.rsp)] < STACK_SIZE);
+			case .PUSH64U: (cast(^u64)&memory[registers[reg(.rsp)]])^ = cast(u64)transmute(u64)registers[instruction.p1]; registers[reg(.rsp)] += 8; assert(registers[reg(.rsp)] < STACK_SIZE);
+
+			case .POP8U:   registers[reg(.rsp)] -= 1; registers[instruction.p1] = cast(u64)(cast(^u8 )&memory[registers[reg(.rsp)]])^;
+			case .POP16U:  registers[reg(.rsp)] -= 2; registers[instruction.p1] = cast(u64)(cast(^u16)&memory[registers[reg(.rsp)]])^;
+			case .POP32U:  registers[reg(.rsp)] -= 4; registers[instruction.p1] = cast(u64)(cast(^u32)&memory[registers[reg(.rsp)]])^;
+			case .POP64U:  registers[reg(.rsp)] -= 8; registers[instruction.p1] = cast(u64)(cast(^u64)&memory[registers[reg(.rsp)]])^;
+
+			case .PUSH8S:  (cast(^i8 )&memory[registers[reg(.rsp)]])^ = cast(i8 )transmute(i64)registers[instruction.p1]; registers[reg(.rsp)] += 1; assert(registers[reg(.rsp)] < STACK_SIZE);
+			case .PUSH16S: (cast(^i16)&memory[registers[reg(.rsp)]])^ = cast(i16)transmute(i64)registers[instruction.p1]; registers[reg(.rsp)] += 2; assert(registers[reg(.rsp)] < STACK_SIZE);
+			case .PUSH32S: (cast(^i32)&memory[registers[reg(.rsp)]])^ = cast(i32)transmute(i64)registers[instruction.p1]; registers[reg(.rsp)] += 4; assert(registers[reg(.rsp)] < STACK_SIZE);
+			case .PUSH64S: (cast(^i64)&memory[registers[reg(.rsp)]])^ = cast(i64)transmute(i64)registers[instruction.p1]; registers[reg(.rsp)] += 8; assert(registers[reg(.rsp)] < STACK_SIZE);
+
+			case .POP8S:   registers[reg(.rsp)] -= 1; registers[instruction.p1] = transmute(u64)cast(i64)(cast(^i8 )&memory[registers[reg(.rsp)]])^;
+			case .POP16S:  registers[reg(.rsp)] -= 2; registers[instruction.p1] = transmute(u64)cast(i64)(cast(^i16)&memory[registers[reg(.rsp)]])^;
+			case .POP32S:  registers[reg(.rsp)] -= 4; registers[instruction.p1] = transmute(u64)cast(i64)(cast(^i32)&memory[registers[reg(.rsp)]])^;
+			case .POP64S:  registers[reg(.rsp)] -= 8; registers[instruction.p1] = transmute(u64)cast(i64)(cast(^i64)&memory[registers[reg(.rsp)]])^;
+
+			case .PUSH32F: (cast(^f32)&memory[registers[reg(.rsp)]])^ = cast(f32)transmute(f64)registers[instruction.p1]; registers[reg(.rsp)] += 4; assert(registers[reg(.rsp)] < STACK_SIZE);
+			case .PUSH64F: (cast(^f64)&memory[registers[reg(.rsp)]])^ = cast(f64)transmute(f64)registers[instruction.p1]; registers[reg(.rsp)] += 8; assert(registers[reg(.rsp)] < STACK_SIZE);
 
 			case .JEQ:      if registers[instruction.p2] == registers[instruction.p3] do registers[reg(.rip)] = registers[reg(.rj)]; increment_ip = false;
 			case .JEZ:      if registers[instruction.p2] == 0                         do registers[reg(.rip)] = registers[reg(.rj)]; increment_ip = false;
@@ -127,10 +130,10 @@ execute :: proc(using vm: ^VM) {
 
 			case .EQ:       registers[instruction.p1] = (registers[instruction.p2] == registers[instruction.p3] ? 1 : 0);
 
-			case .SV8U:     (cast(^u8 )&memory[registers[instruction.p1]])^ = cast(u8 )registers[instruction.p2];
-			case .SV16U:    (cast(^u16)&memory[registers[instruction.p1]])^ = cast(u16)registers[instruction.p2];
-			case .SV32U:    (cast(^u32)&memory[registers[instruction.p1]])^ = cast(u32)registers[instruction.p2];
-			case .SV64U:    (cast(^u64)&memory[registers[instruction.p1]])^ = cast(u64)registers[instruction.p2];
+			case .SV8U:     (cast(^u8 )&memory[registers[instruction.p1]])^ = cast(u8 )transmute(u64)registers[instruction.p2];
+			case .SV16U:    (cast(^u16)&memory[registers[instruction.p1]])^ = cast(u16)transmute(u64)registers[instruction.p2];
+			case .SV32U:    (cast(^u32)&memory[registers[instruction.p1]])^ = cast(u32)transmute(u64)registers[instruction.p2];
+			case .SV64U:    (cast(^u64)&memory[registers[instruction.p1]])^ = cast(u64)transmute(u64)registers[instruction.p2];
 			case .LD8U:     registers[instruction.p1] = cast(u64)(cast(^u8 )&memory[registers[instruction.p2]])^;
 			case .LD16U:    registers[instruction.p1] = cast(u64)(cast(^u16)&memory[registers[instruction.p2]])^;
 			case .LD32U:    registers[instruction.p1] = cast(u64)(cast(^u32)&memory[registers[instruction.p2]])^;
@@ -149,15 +152,6 @@ execute :: proc(using vm: ^VM) {
 			case .SV64F:    (cast(^f64)&memory[registers[instruction.p1]])^ = cast(f64)transmute(f64)registers[instruction.p2];
 			case .LD32F:    registers[instruction.p1] = transmute(u64)cast(f64)(cast(^f32)&memory[registers[instruction.p2]])^;
 			case .LD64F:    registers[instruction.p1] = transmute(u64)cast(f64)(cast(^f64)&memory[registers[instruction.p2]])^;
-
-			// case .SVO8:     (cast(^u8 )&memory[registers[instruction.p1]+instruction.p2])^ = cast(u8 )registers[instruction.p3];
-			// case .SVO16:    (cast(^u16)&memory[registers[instruction.p1]+instruction.p2])^ = cast(u16)registers[instruction.p3];
-			// case .SVO32:    (cast(^u32)&memory[registers[instruction.p1]+instruction.p2])^ = cast(u32)registers[instruction.p3];
-			// case .SVO64:    (cast(^u64)&memory[registers[instruction.p1]+instruction.p2])^ = cast(u64)registers[instruction.p3];
-			// case .LDO8:     registers[instruction.p1] = cast(u64)(cast(^u8 )&memory[registers[instruction.p2]+instruction.p3])^;
-			// case .LDO16:    registers[instruction.p1] = cast(u64)(cast(^u16)&memory[registers[instruction.p2]+instruction.p3])^;
-			// case .LDO32:    registers[instruction.p1] = cast(u64)(cast(^u32)&memory[registers[instruction.p2]+instruction.p3])^;
-			// case .LDO64:    registers[instruction.p1] = cast(u64)(cast(^u64)&memory[registers[instruction.p2]+instruction.p3])^;
 
 			case .ADDSIM:   registers[instruction.p1] = transmute(u64)(transmute(i64)registers[instruction.p2] + transmute(i64)instruction.p3);
 			case .ADDUIM:   registers[instruction.p1] = transmute(u64)(transmute(u64)registers[instruction.p2] + transmute(u64)instruction.p3);
@@ -212,48 +206,6 @@ destroy_vm :: proc(using vm: ^VM) {
 	delete(instruction_hit_counts);
 }
 
-// print_registers :: proc(vm: ^VM) {
-// 	println("Stack:");
-// 	for v, i in vm.stack_memory {
-// 		if cast(u64)i > vm.registers[reg(.rsp)] do break;
-
-// 		print(v, "  ");
-// 	}
-// 	print("\n");
-
-// 	println("registers:");
-
-// 	str_buf := strings.make_builder();
-// 	defer strings.destroy_builder(&str_buf);
-
-// 	counter := 0;
-// 	for r, i in vm.registers {
-// 		buf: [1024]byte;
-// 		length_of_register_name  := len(bprint(buf[:], cast(Register)i));
-// 		length_of_register_value := len(bprint(buf[:], r));
-
-// 		sbprint(&str_buf, cast(Register)i, ": ");
-// 		for _ in 0..(max(5-length_of_register_name, 2)) do sbprint(&str_buf, " ");
-// 		sbprint(&str_buf, r);
-// 		for _ in 0..(max(12-length_of_register_value, 2)) do sbprint(&str_buf, " ");
-
-// 		counter += 1;
-// 		if counter >= 8 {
-// 			counter = 0;
-// 			println(strings.to_string(str_buf));
-// 			clear(&str_buf.buf);
-// 		}
-// 	}
-// }
-
-when DEBUG_MODE {
-	print_instruction_counts :: proc(vm: ^VM) {
-		for val, idx in vm.instruction_hit_counts {
-			println(vm.instructions[idx].kind, val);
-		}
-	}
-}
-
 Instruction_Type :: enum u16 {
 	INVALID,
 
@@ -274,9 +226,6 @@ Instruction_Type :: enum u16 {
 	SV32F, SV64F,
 	LD32F, LD64F,
 
-	// SVO8, SVO16, SVO32, SVO64,
-	// LDO8, LDO16, LDO32, LDO64,
-
 	ADDS, SUBS, MULS, DIVS, MODS, MODMODS,
 
 	ADDU, SUBU, MULU, DIVU, MODU, MODMODU,
@@ -294,9 +243,15 @@ Instruction_Type :: enum u16 {
 
 	MOV, MOVIM,
 
-	// PSEUDOINSTRUCTIONS
+	PUSH8U,  PUSH16U, PUSH32U, PUSH64U,
+	PUSH8S,  PUSH16S, PUSH32S, PUSH64S,
+	PUSH32F, PUSH64F,
 
-	PUSH, POP,
+	POP8U,  POP16U, POP32U, POP64U,
+	POP8S,  POP16S, POP32S, POP64S,
+	POP32F, POP64F,
+
+	// PSEUDOINSTRUCTIONS
 
 	// CALL, RET,
 	// TAIL,
@@ -452,30 +407,6 @@ ld32f :: inline proc(using vm: ^VM, dst: Register, src: Register) {
 ld64f :: inline proc(using vm: ^VM, dst: Register, src: Register) {
 	add_instruction(vm, Instruction{.LD64F, cast(u64)dst, cast(u64)src, 0});
 }
-// svo8 :: inline proc(using vm: ^VM, dst: Register, offset: u64, r1: Register) {
-// 	add_instruction(vm, Instruction{.SVO8, cast(u64)dst, offset, cast(u64)r1});
-// }
-// svo16 :: inline proc(using vm: ^VM, dst: Register, offset: u64, r1: Register) {
-// 	add_instruction(vm, Instruction{.SVO16, cast(u64)dst, offset, cast(u64)r1});
-// }
-// svo32 :: inline proc(using vm: ^VM, dst: Register, offset: u64, r1: Register) {
-// 	add_instruction(vm, Instruction{.SVO32, cast(u64)dst, offset, cast(u64)r1});
-// }
-// svo64 :: inline proc(using vm: ^VM, dst: Register, offset: u64, r1: Register) {
-// 	add_instruction(vm, Instruction{.SVO64, cast(u64)dst, offset, cast(u64)r1});
-// }
-// ldo8 :: inline proc(using vm: ^VM, dst: Register, src: Register, offset: u64) {
-// 	add_instruction(vm, Instruction{.LDO8, cast(u64)dst, cast(u64)src, offset});
-// }
-// ldo16 :: inline proc(using vm: ^VM, dst: Register, src: Register, offset: u64) {
-// 	add_instruction(vm, Instruction{.LDO16, cast(u64)dst, cast(u64)src, offset});
-// }
-// ldo32 :: inline proc(using vm: ^VM, dst: Register, src: Register, offset: u64) {
-// 	add_instruction(vm, Instruction{.LDO32, cast(u64)dst, cast(u64)src, offset});
-// }
-// ldo64 :: inline proc(using vm: ^VM, dst: Register, src: Register, offset: u64) {
-// 	add_instruction(vm, Instruction{.LDO64, cast(u64)dst, cast(u64)src, offset});
-// }
 
 
 
@@ -559,12 +490,81 @@ or :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 xor :: inline proc(using vm: ^VM, rd, p1, p2: Register) {
 	add_instruction(vm, Instruction{.XOR, cast(u64)rd, cast(u64)p1, cast(u64)p2});
 }
-stack_push :: inline proc(using vm: ^VM, r1: Register, bytes: u64) {
-	add_instruction(vm, Instruction{.PUSH, cast(u64)r1, bytes, 0});
+// stack_push :: inline proc(using vm: ^VM, r1: Register) {
+// 	add_instruction(vm, Instruction{.PUSH, cast(u64)r1, 0, 0});
+// }
+// stack_pop :: inline proc(using vm: ^VM, r1: Register) {
+// 	add_instruction(vm, Instruction{.POP, cast(u64)r1, 0, 0});
+// }
+
+push8u :: inline proc(using vm: ^VM, p1: Register) {
+	add_instruction(vm, Instruction{.PUSH8U, cast(u64)p1, 0, 0});
 }
-stack_pop :: inline proc(using vm: ^VM, r1: Register, bytes: u64) {
-	add_instruction(vm, Instruction{.POP, cast(u64)r1, bytes, 0});
+push16u :: inline proc(using vm: ^VM, p1: Register) {
+	add_instruction(vm, Instruction{.PUSH16U, cast(u64)p1, 0, 0});
 }
+push32u :: inline proc(using vm: ^VM, p1: Register) {
+	add_instruction(vm, Instruction{.PUSH32U, cast(u64)p1, 0, 0});
+}
+push64u :: inline proc(using vm: ^VM, p1: Register) {
+	add_instruction(vm, Instruction{.PUSH64U, cast(u64)p1, 0, 0});
+}
+
+push8s :: inline proc(using vm: ^VM, p1: Register) {
+	add_instruction(vm, Instruction{.PUSH8S, cast(u64)p1, 0, 0});
+}
+push16s :: inline proc(using vm: ^VM, p1: Register) {
+	add_instruction(vm, Instruction{.PUSH16S, cast(u64)p1, 0, 0});
+}
+push32s :: inline proc(using vm: ^VM, p1: Register) {
+	add_instruction(vm, Instruction{.PUSH32S, cast(u64)p1, 0, 0});
+}
+push64s :: inline proc(using vm: ^VM, p1: Register) {
+	add_instruction(vm, Instruction{.PUSH64S, cast(u64)p1, 0, 0});
+}
+
+push32f :: inline proc(using vm: ^VM, p1: Register) {
+	add_instruction(vm, Instruction{.PUSH32F, cast(u64)p1, 0, 0});
+}
+push64f :: inline proc(using vm: ^VM, p1: Register) {
+	add_instruction(vm, Instruction{.PUSH64F, cast(u64)p1, 0, 0});
+}
+
+
+pop8u :: inline proc(using vm: ^VM, rd: Register) {
+	add_instruction(vm, Instruction{.POP8U, cast(u64)rd, 0, 0});
+}
+pop16u :: inline proc(using vm: ^VM, rd: Register) {
+	add_instruction(vm, Instruction{.POP16U, cast(u64)rd, 0, 0});
+}
+pop32u :: inline proc(using vm: ^VM, rd: Register) {
+	add_instruction(vm, Instruction{.POP32U, cast(u64)rd, 0, 0});
+}
+pop64u :: inline proc(using vm: ^VM, rd: Register) {
+	add_instruction(vm, Instruction{.POP64U, cast(u64)rd, 0, 0});
+}
+
+pop8s :: inline proc(using vm: ^VM, rd: Register) {
+	add_instruction(vm, Instruction{.POP8S, cast(u64)rd, 0, 0});
+}
+pop16s :: inline proc(using vm: ^VM, rd: Register) {
+	add_instruction(vm, Instruction{.POP16S, cast(u64)rd, 0, 0});
+}
+pop32s :: inline proc(using vm: ^VM, rd: Register) {
+	add_instruction(vm, Instruction{.POP32S, cast(u64)rd, 0, 0});
+}
+pop64s :: inline proc(using vm: ^VM, rd: Register) {
+	add_instruction(vm, Instruction{.POP64S, cast(u64)rd, 0, 0});
+}
+
+pop32f :: inline proc(using vm: ^VM, rd: Register) {
+	add_instruction(vm, Instruction{.POP32F, cast(u64)rd, 0, 0});
+}
+pop64f :: inline proc(using vm: ^VM, rd: Register) {
+	add_instruction(vm, Instruction{.POP64F, cast(u64)rd, 0, 0});
+}
+
+
 
 // PSEUDOINSTRUCTIONS
 
@@ -606,20 +606,13 @@ label :: inline proc(using vm: ^VM, str: string) {
 }
 
 
+
 main :: proc() {
 	unimplemented();
-// 	code :=
-// `
-// movi r1 12
-// movi r2 10
-// add r3 r1 r2
-// `;
-// 	parse_and_execute(code);
 }
 
-parse_and_execute :: proc(code: string) {
-	_vm: VM;
-	vm := &_vm;
+parse_and_execute :: proc(code: string, out_vm: ^VM) {
+	vm := out_vm;
 	lexer := make_lexer(code);
 	token: Token;
 	for get_next_token(&lexer, &token) {
@@ -647,15 +640,85 @@ parse_and_execute :: proc(code: string) {
 						val := transmute(f64)parse_number(&lexer, u64);
 						movfim(vm, dst, val);
 					}
-					case "push": {
+					case "push8u": {
 						src := parse_register(&lexer);
-						size := parse_number(&lexer, u64);
-						stack_push(vm, src, size);
+						push8u(vm, src);
 					}
-					case "pop": {
+					case "pop8u": {
 						dst := parse_register(&lexer);
-						size := parse_number(&lexer, u64);
-						stack_pop(vm, dst, size);
+						pop8u(vm, dst);
+					}
+					case "push16u": {
+						src := parse_register(&lexer);
+						push16u(vm, src);
+					}
+					case "pop16u": {
+						dst := parse_register(&lexer);
+						pop16u(vm, dst);
+					}
+					case "push32u": {
+						src := parse_register(&lexer);
+						push32u(vm, src);
+					}
+					case "pop32u": {
+						dst := parse_register(&lexer);
+						pop32u(vm, dst);
+					}
+					case "push64u": {
+						src := parse_register(&lexer);
+						push64u(vm, src);
+					}
+					case "pop64u": {
+						dst := parse_register(&lexer);
+						pop64u(vm, dst);
+					}
+					case "push8s": {
+						src := parse_register(&lexer);
+						push8s(vm, src);
+					}
+					case "pop8s": {
+						dst := parse_register(&lexer);
+						pop8s(vm, dst);
+					}
+					case "push16s": {
+						src := parse_register(&lexer);
+						push16s(vm, src);
+					}
+					case "pop16s": {
+						dst := parse_register(&lexer);
+						pop16s(vm, dst);
+					}
+					case "push32s": {
+						src := parse_register(&lexer);
+						push32s(vm, src);
+					}
+					case "pop32s": {
+						dst := parse_register(&lexer);
+						pop32s(vm, dst);
+					}
+					case "push64s": {
+						src := parse_register(&lexer);
+						push64s(vm, src);
+					}
+					case "pop64s": {
+						dst := parse_register(&lexer);
+						pop64s(vm, dst);
+					}
+					case "push32f": {
+						src := parse_register(&lexer);
+						push32f(vm, src);
+					}
+					case "pop32f": {
+						dst := parse_register(&lexer);
+						pop32f(vm, dst);
+					}
+					case "push64f": {
+						src := parse_register(&lexer);
+						push64f(vm, src);
+					}
+					case "pop64f": {
+						dst := parse_register(&lexer);
+						pop64f(vm, dst);
 					}
 					case "jeq": {
 						unimplemented("jeq");
@@ -790,54 +853,6 @@ parse_and_execute :: proc(code: string) {
 						src := parse_register(&lexer);
 						ld64f(vm, dst, src);
 					}
-					// case "svo8": {
-					// 	dst := parse_register(&lexer);
-					// 	offset := parse_number(&lexer);
-					// 	src := parse_register(&lexer);
-					// 	svo8(vm, dst, offset, src);
-					// }
-					// case "svo16": {
-					// 	dst := parse_register(&lexer);
-					// 	offset := parse_number(&lexer);
-					// 	src := parse_register(&lexer);
-					// 	svo16(vm, dst, offset, src);
-					// }
-					// case "svo32": {
-					// 	dst := parse_register(&lexer);
-					// 	offset := parse_number(&lexer);
-					// 	src := parse_register(&lexer);
-					// 	svo32(vm, dst, offset, src);
-					// }
-					// case "svo64": {
-					// 	dst := parse_register(&lexer);
-					// 	offset := parse_number(&lexer);
-					// 	src := parse_register(&lexer);
-					// 	svo64(vm, dst, offset, src);
-					// }
-					// case "ldo8": {
-					// 	dst := parse_register(&lexer);
-					// 	src := parse_register(&lexer);
-					// 	offset := parse_number(&lexer);
-					// 	ldo8(vm, dst, src, offset);
-					// }
-					// case "ldo16": {
-					// 	dst := parse_register(&lexer);
-					// 	src := parse_register(&lexer);
-					// 	offset := parse_number(&lexer);
-					// 	ldo16(vm, dst, src, offset);
-					// }
-					// case "ldo32": {
-					// 	dst := parse_register(&lexer);
-					// 	src := parse_register(&lexer);
-					// 	offset := parse_number(&lexer);
-					// 	ldo32(vm, dst, src, offset);
-					// }
-					// case "ldo64": {
-					// 	dst := parse_register(&lexer);
-					// 	src := parse_register(&lexer);
-					// 	offset := parse_number(&lexer);
-					// 	ldo64(vm, dst, src, offset);
-					// }
 					case "addsim": {
 						dst := parse_register(&lexer);
 						r1 := parse_register(&lexer);
